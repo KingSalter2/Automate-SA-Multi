@@ -3,7 +3,6 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { mockVehicles } from "@/data/mockVehicles";
 import { 
   Calendar, 
   Gauge, 
@@ -28,46 +27,125 @@ import NotFound from "./NotFound";
 import { FinanceCalculatorModal } from "@/components/finance/FinanceCalculatorModal";
 import { EnquiryModal } from "@/components/vehicles/EnquiryModal";
 import { PublicTestDriveModal } from "@/components/vehicles/PublicTestDriveModal";
-
-// Import vehicle images same as VehicleCard for consistency
-// Ideally these should be in a centralized helper or context
-import bmw3Series from '@/assets/vehicles/bmw-3-series.jpg';
-import mercedesCClass from '@/assets/vehicles/mercedes-c-class.jpg';
-import vwGolfGti from '@/assets/vehicles/vw-golf-gti.jpg';
-import toyotaHilux from '@/assets/vehicles/toyota-hilux.jpg';
-import fordRanger from '@/assets/vehicles/ford-ranger.jpg';
-import audiA4 from '@/assets/vehicles/audi-a4.jpg';
-import porscheCayenne from '@/assets/vehicles/porsche-cayenne.jpg';
-import landRoverDefender from '@/assets/vehicles/land-rover-defender.jpg';
-
-const vehicleImages: Record<string, string> = {
-  '1': bmw3Series,
-  '2': mercedesCClass,
-  '3': vwGolfGti,
-  '4': toyotaHilux,
-  '5': fordRanger,
-  '6': audiA4,
-  '7': porscheCayenne,
-  '8': landRoverDefender,
-};
+import { useQuery } from "@tanstack/react-query";
+import type { Vehicle } from "@/types/vehicle";
 
 const VehicleDetailsPage = () => {
   const { id } = useParams();
-  const vehicle = mockVehicles.find((v) => v.id === id);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isFinanceModalOpen, setIsFinanceModalOpen] = useState(false);
   const [isEnquiryModalOpen, setIsEnquiryModalOpen] = useState(false);
   const [isTestDriveModalOpen, setIsTestDriveModalOpen] = useState(false);
 
-  if (!vehicle) {
-    return <NotFound />;
+  const toNumber = (v: unknown) => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string") return Number(v);
+    return 0;
+  };
+
+  const toOptionalNumber = (v: unknown) => {
+    if (v == null) return undefined;
+    const n = toNumber(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  const toStringArray = (v: unknown) => {
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is string => typeof x === "string");
+  };
+
+  const toDate = (v: unknown) => {
+    if (!v) return new Date();
+    const d = new Date(typeof v === "string" || typeof v === "number" ? v : String(v));
+    return Number.isNaN(d.getTime()) ? new Date() : d;
+  };
+
+  const fromApiVehicle = (raw: Record<string, unknown>): Vehicle => ({
+    id: String(raw.id ?? ""),
+    make: String(raw.make ?? ""),
+    model: String(raw.model ?? ""),
+    variant: raw.variant ? String(raw.variant) : undefined,
+    year: toNumber(raw.year),
+    price: toNumber(raw.price),
+    originalPrice: toOptionalNumber(raw.originalPrice),
+    mileage: toNumber(raw.mileage),
+    fuelType: String(raw.fuelType ?? "Petrol") as Vehicle["fuelType"],
+    transmission: String(raw.transmission ?? "Automatic") as Vehicle["transmission"],
+    bodyType: String(raw.bodyType ?? "Sedan") as Vehicle["bodyType"],
+    condition: String(raw.condition ?? "Used") as Vehicle["condition"],
+    drive: raw.drive ? (String(raw.drive) as NonNullable<Vehicle["drive"]>) : undefined,
+    seats: raw.seats == null ? undefined : toNumber(raw.seats),
+    color: String(raw.color ?? ""),
+    engineSize: raw.engineSize ? String(raw.engineSize) : undefined,
+    images: toStringArray(raw.images),
+    features: toStringArray(raw.features),
+    isSpecialOffer: typeof raw.isSpecialOffer === "boolean" ? raw.isSpecialOffer : undefined,
+    estMonthlyPayment: toOptionalNumber(raw.estMonthlyPayment),
+    status: String(raw.status ?? "draft") as Vehicle["status"],
+    vin: raw.vin ? String(raw.vin) : undefined,
+    engineNumber: raw.engineNumber ? String(raw.engineNumber) : undefined,
+    registrationNumber: raw.registrationNumber ? String(raw.registrationNumber) : undefined,
+    stockNumber: String(raw.stockNumber ?? ""),
+    costPrice: toOptionalNumber(raw.costPrice),
+    reconditioningCost: toOptionalNumber(raw.reconditioningCost),
+    natisNumber: raw.natisNumber ? String(raw.natisNumber) : undefined,
+    previousOwner: raw.previousOwner ? String(raw.previousOwner) : undefined,
+    keyNumber: raw.keyNumber ? String(raw.keyNumber) : undefined,
+    supplier: raw.supplier ? String(raw.supplier) : undefined,
+    purchaseDate: raw.purchaseDate ? toDate(raw.purchaseDate) : undefined,
+    branch: String(raw.branch ?? ""),
+    description: raw.description ? String(raw.description) : undefined,
+    serviceHistory: typeof raw.serviceHistory === "boolean" ? raw.serviceHistory : undefined,
+    warrantyMonths: raw.warrantyMonths == null ? undefined : toNumber(raw.warrantyMonths),
+    createdAt: toDate(raw.createdAt),
+  });
+
+  const vehicleQuery = useQuery({
+    queryKey: ["vehicle-public", id],
+    enabled: typeof id === "string" && id.trim().length > 0,
+    queryFn: async () => {
+      const res = await fetch(`/.netlify/functions/vehicles-public?id=${encodeURIComponent(id!)}`);
+      if (res.status === 404) return null;
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to load vehicle");
+      }
+      const data = (await res.json()) as { vehicle: Record<string, unknown> };
+      return fromApiVehicle(data.vehicle);
+    },
+  });
+
+  const buildPublicImageUrl = (value: string | undefined) => {
+    if (!value) return "/placeholder.svg";
+    const trimmed = value.trim();
+    if (!trimmed) return "/placeholder.svg";
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    const base = (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITE_R2_PUBLIC_BASE_URL;
+    const baseUrl = typeof base === "string" ? base.trim() : "";
+    if (!baseUrl) return trimmed;
+    return `${baseUrl.replace(/\/+$/, "")}/${trimmed.replace(/^\/+/, "")}`;
+  };
+
+  if (vehicleQuery.isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="pt-28 pb-20">
+          <div className="container mx-auto px-4">
+            <p className="text-muted-foreground">Loading vehicle…</p>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
   }
 
-  // Fallback to single image if multiple images aren't in mock data
-  // In a real app, vehicle.images would be an array of URLs
-  const displayImages = vehicle.images && vehicle.images.length > 0 
-    ? vehicle.images 
-    : [vehicleImages[vehicle.id] || vehicleImages['1']];
+  const vehicle = vehicleQuery.data;
+  if (!vehicle) return <NotFound />;
+
+  const displayImages = (vehicle.images && vehicle.images.length > 0 ? vehicle.images : ["/placeholder.svg"]).map(
+    buildPublicImageUrl,
+  );
 
   // Helper to format currency
   const formatPrice = (price: number) => {

@@ -3,15 +3,27 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { useState } from 'react';
-import { makes, bodyTypes, fuelTypes, transmissions, conditions, branches } from '@/data/mockVehicles';
 import { SearchFilters } from '@/types/vehicle';
 
 interface SearchFilterBarProps {
   filters: SearchFilters;
   onFiltersChange: (filters: SearchFilters) => void;
+  makes?: string[];
+  bodyTypes?: string[];
+  fuelTypes?: string[];
+  transmissions?: string[];
+  conditions?: string[];
 }
 
-export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarProps) {
+export function SearchFilterBar({
+  filters,
+  onFiltersChange,
+  makes = [],
+  bodyTypes = [],
+  fuelTypes = [],
+  transmissions = [],
+  conditions = [],
+}: SearchFilterBarProps) {
   const [showFilters, setShowFilters] = useState(false);
 
   const updateFilter = (key: keyof SearchFilters, value: string | number | undefined) => {
@@ -76,19 +88,22 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
 
       {/* Quick Filters */}
       <div className="flex flex-wrap gap-2">
-        {makes.slice(0, 6).map((make) => (
-          <button
-            key={make}
-            onClick={() => updateFilter('make', filters.make === make ? undefined : make)}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-300 ${
-              filters.make === make
-                ? 'bg-primary text-primary-foreground shadow-md'
-                : 'bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80'
-            }`}
-          >
-            {make}
-          </button>
-        ))}
+        {makes.slice(0, 6).map((make) => {
+          const isActive = filters.make === make;
+          return (
+            <button
+              key={make}
+              onClick={() => updateFilter('make', isActive ? undefined : make)}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-300 ${
+                isActive
+                  ? 'bg-primary text-primary-foreground shadow-md'
+                  : 'bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80'
+              }`}
+            >
+              {make}
+            </button>
+          );
+        })}
       </div>
 
       {/* Extended Filters */}

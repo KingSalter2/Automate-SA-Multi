@@ -5,11 +5,12 @@ import { Input } from "@/components/ui/input";
 import { VehicleList } from "@/components/dashboard/inventory/VehicleList";
 import { VehicleFormDialog } from "@/components/dashboard/inventory/VehicleFormDialog";
 import { VehiclePreviewDialog } from "@/components/dashboard/inventory/VehiclePreviewDialog";
-import { mockVehicles, makes } from "@/data/mockVehicles";
 import { Vehicle } from "@/types/vehicle";
 import { useToast } from "@/components/ui/use-toast";
 import { scanLicenseDisc, scanFromCamera } from "@/services/ocr";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/auth/AuthContext";
 import {
   Select,
   SelectContent,
@@ -35,7 +36,8 @@ import { downloadCSV } from "@/utils/exportUtils";
 import { differenceInDays } from "date-fns";
 
 export default function InventoryPage() {
-  const [vehicles, setVehicles] = useState<Vehicle[]>(mockVehicles);
+  const queryClient = useQueryClient();
+  const { getIdToken } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isScanOpen, setIsScanOpen] = useState(false);
@@ -60,6 +62,141 @@ export default function InventoryPage() {
   const [filterAge, setFilterAge] = useState("all");
 
   const { toast } = useToast();
+
+  const toNumber = (v: unknown) => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string") return Number(v);
+    return 0;
+  };
+
+  const toOptionalNumber = (v: unknown) => {
+    if (v == null) return undefined;
+    const n = toNumber(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  const toStringArray = (v: unknown) => {
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is string => typeof x === "string");
+  };
+
+  const toDate = (v: unknown) => {
+    if (!v) return new Date();
+    const d = new Date(typeof v === "string" || typeof v === "number" ? v : String(v));
+    return Number.isNaN(d.getTime()) ? new Date() : d;
+  };
+
+  const fromApiVehicle = (raw: Record<string, unknown>): Vehicle => {
+    const purchaseDate = raw.purchaseDate ? toDate(raw.purchaseDate) : undefined;
+    return {
+      id: String(raw.id ?? ""),
+      make: String(raw.make ?? ""),
+      model: String(raw.model ?? ""),
+      variant: raw.variant ? String(raw.variant) : undefined,
+      year: toNumber(raw.year),
+      price: toNumber(raw.price),
+      originalPrice: toOptionalNumber(raw.originalPrice),
+      mileage: toNumber(raw.mileage),
+      fuelType: String(raw.fuelType ?? "Petrol") as Vehicle["fuelType"],
+      transmission: String(raw.transmission ?? "Automatic") as Vehicle["transmission"],
+      bodyType: String(raw.bodyType ?? "Sedan") as Vehicle["bodyType"],
+      condition: String(raw.condition ?? "Used") as Vehicle["condition"],
+      drive: raw.drive ? (String(raw.drive) as NonNullable<Vehicle["drive"]>) : undefined,
+      seats: raw.seats == null ? undefined : toNumber(raw.seats),
+      color: String(raw.color ?? ""),
+      engineSize: raw.engineSize ? String(raw.engineSize) : undefined,
+      images: toStringArray(raw.images),
+      features: toStringArray(raw.features),
+      isSpecialOffer: typeof raw.isSpecialOffer === "boolean" ? raw.isSpecialOffer : undefined,
+      estMonthlyPayment: toOptionalNumber(raw.estMonthlyPayment),
+      status: String(raw.status ?? "draft") as Vehicle["status"],
+      vin: raw.vin ? String(raw.vin) : undefined,
+      engineNumber: raw.engineNumber ? String(raw.engineNumber) : undefined,
+      registrationNumber: raw.registrationNumber ? String(raw.registrationNumber) : undefined,
+      stockNumber: String(raw.stockNumber ?? ""),
+      costPrice: toOptionalNumber(raw.costPrice),
+      reconditioningCost: toOptionalNumber(raw.reconditioningCost),
+      natisNumber: raw.natisNumber ? String(raw.natisNumber) : undefined,
+      previousOwner: raw.previousOwner ? String(raw.previousOwner) : undefined,
+      keyNumber: raw.keyNumber ? String(raw.keyNumber) : undefined,
+      supplier: raw.supplier ? String(raw.supplier) : undefined,
+      purchaseDate,
+      branch: String(raw.branch ?? ""),
+      description: raw.description ? String(raw.description) : undefined,
+      serviceHistory: typeof raw.serviceHistory === "boolean" ? raw.serviceHistory : undefined,
+      warrantyMonths: raw.warrantyMonths == null ? undefined : toNumber(raw.warrantyMonths),
+      createdAt: toDate(raw.createdAt),
+    };
+  };
+
+  const vehiclesQuery = useQuery({
+    queryKey: ["vehicles-admin"],
+    queryFn: async () => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Not signed in");
+
+      const res = await fetch("/.netlify/functions/vehicles-admin", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to load vehicles");
+      }
+      const data = (await res.json()) as { vehicles: Array<Record<string, unknown>> };
+      return data.vehicles.map(fromApiVehicle);
+    },
+  });
+
+  const upsertVehicleMutation = useMutation({
+    mutationFn: async (payload: Partial<Vehicle>) => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Not signed in");
+
+      const res = await fetch("/.netlify/functions/vehicles-admin", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to save vehicle");
+      }
+      const data = (await res.json()) as { vehicle: Record<string, unknown> };
+      return fromApiVehicle(data.vehicle);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["vehicles-admin"] });
+    },
+  });
+
+  const deleteVehicleMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Not signed in");
+
+      const res = await fetch(`/.netlify/functions/vehicles-admin?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (!res.ok && res.status !== 204) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to delete vehicle");
+      }
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["vehicles-admin"] });
+    },
+  });
+
+  const vehicles = vehiclesQuery.data ?? [];
+
+  const uniqueMakes = useMemo(() => {
+    const makes = new Set(vehicles.map((v) => v.make).filter((m) => m.trim().length > 0));
+    return Array.from(makes).sort();
+  }, [vehicles]);
 
   const uniqueModels = useMemo(() => {
     const relevantVehicles = filterMake === "all" ? vehicles : vehicles.filter(v => v.make === filterMake);
@@ -109,7 +246,7 @@ export default function InventoryPage() {
 
       return true;
     });
-  }, [vehicles, searchQuery, activeTab, filterMake, filterAge]);
+  }, [vehicles, searchQuery, activeTab, filterMake, filterModel, filterYear, filterAge]);
 
   const handleExport = (exportFormat: 'csv' | 'excel') => {
     const extension = exportFormat === 'excel' ? 'xls' : 'csv';
@@ -128,40 +265,57 @@ export default function InventoryPage() {
     downloadCSV(dataToExport, 'inventory_report', extension);
   };
 
-  const handleAddVehicle = (data: Partial<Vehicle>) => {
-    const newVehicle: Vehicle = {
-      ...data as Vehicle,
-      id: Date.now().toString(),
-      createdAt: new Date(),
-    };
-    
-    setVehicles([newVehicle, ...vehicles]);
-    toast({
-      title: data.status === 'draft' ? "Draft Saved" : "Vehicle Added",
-      description: `${newVehicle.year} ${newVehicle.make} ${newVehicle.model} has been ${data.status === 'draft' ? 'saved as draft' : 'added to inventory'}.`,
-    });
+  const handleAddVehicle = async (data: Partial<Vehicle>) => {
+    try {
+      const saved = await upsertVehicleMutation.mutateAsync(data);
+      toast({
+        title: saved.status === "draft" ? "Draft Saved" : "Vehicle Added",
+        description: `${saved.year} ${saved.make} ${saved.model} has been ${saved.status === "draft" ? "saved as draft" : "added to inventory"}.`,
+      });
+    } catch (e: unknown) {
+      toast({
+        title: "Save failed",
+        description: e instanceof Error ? e.message : "Could not save vehicle.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleUpdateVehicle = (data: Partial<Vehicle>) => {
+  const handleUpdateVehicle = async (data: Partial<Vehicle>) => {
     if (!editingVehicle) return;
-
-    const updatedVehicle = { ...editingVehicle, ...data } as Vehicle;
-    
-    setVehicles(vehicles.map((v) => (v.id === editingVehicle.id ? updatedVehicle : v)));
-    setEditingVehicle(null);
-    toast({
-      title: "Vehicle Updated",
-      description: "Vehicle details have been successfully updated.",
-    });
+    try {
+      await upsertVehicleMutation.mutateAsync({ ...editingVehicle, ...data });
+      setEditingVehicle(null);
+      toast({
+        title: "Vehicle Updated",
+        description: "Vehicle details have been successfully updated.",
+      });
+    } catch (e: unknown) {
+      toast({
+        title: "Update failed",
+        description: e instanceof Error ? e.message : "Could not update vehicle.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleDeleteVehicle = (id: string) => {
     if (window.confirm("Are you sure you want to delete this vehicle? This action cannot be undone.")) {
-      setVehicles(vehicles.filter((v) => v.id !== id));
-      toast({
-        title: "Vehicle Deleted",
-        description: "The vehicle has been removed from inventory.",
-        variant: "destructive",
+      deleteVehicleMutation.mutate(id, {
+        onSuccess: () => {
+          toast({
+            title: "Vehicle Deleted",
+            description: "The vehicle has been removed from inventory.",
+            variant: "destructive",
+          });
+        },
+        onError: (e: unknown) => {
+          toast({
+            title: "Delete failed",
+            description: e instanceof Error ? e.message : "Could not delete vehicle.",
+            variant: "destructive",
+          });
+        },
       });
     }
   };
@@ -288,6 +442,14 @@ export default function InventoryPage() {
 
   return (
     <div className="space-y-6">
+      {vehiclesQuery.isLoading && (
+        <div className="rounded-md border bg-card p-4 text-sm text-muted-foreground">Loading vehicles...</div>
+      )}
+      {vehiclesQuery.isError && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          {vehiclesQuery.error instanceof Error ? vehiclesQuery.error.message : "Failed to load vehicles."}
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Inventory</h1>
@@ -354,7 +516,7 @@ export default function InventoryPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Makes</SelectItem>
-              {makes.map(make => (
+              {uniqueMakes.map((make) => (
                 <SelectItem key={make} value={make}>{make}</SelectItem>
               ))}
             </SelectContent>
@@ -390,9 +552,10 @@ export default function InventoryPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Ages</SelectItem>
-              {uniqueYears.map(year => (
-                <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
-              ))}
+              <SelectItem value="0-30">0-30 days</SelectItem>
+              <SelectItem value="31-60">31-60 days</SelectItem>
+              <SelectItem value="61-90">61-90 days</SelectItem>
+              <SelectItem value="90+">90+ days</SelectItem>
             </SelectContent>
           </Select>
         </div>

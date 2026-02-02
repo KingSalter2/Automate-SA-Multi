@@ -36,6 +36,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Vehicle } from "@/types/vehicle";
 import { Plus, X, Upload, Image as ImageIcon, Eye, Save, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/auth/AuthContext";
 
 // Form Schema
 const vehicleFormSchema = z.object({
@@ -91,6 +92,7 @@ export function VehicleFormDialog({
   onSubmit,
   onPreview,
 }: VehicleFormDialogProps) {
+  const { getIdToken } = useAuth();
   const form = useForm<VehicleFormValues>({
     resolver: zodResolver(vehicleFormSchema),
     defaultValues: {
@@ -186,21 +188,80 @@ export function VehicleFormDialog({
     onOpenChange(false);
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
+
+  const getExtension = (filename: string) => {
+    const parts = filename.split(".");
+    if (parts.length < 2) return null;
+    const ext = parts[parts.length - 1]?.trim().toLowerCase();
+    if (!ext) return null;
+    return ext;
+  };
+
+  const buildPublicUrl = (key: string) => {
+    const base = (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITE_R2_PUBLIC_BASE_URL;
+    const baseUrl = typeof base === "string" ? base.trim() : "";
+    if (!baseUrl) return key;
+    return `${baseUrl.replace(/\/+$/, "")}/${key.replace(/^\/+/, "")}`;
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (files && files.length > 0) {
-      const newImages = [...form.getValues("images")];
-      
-      Array.from(files).forEach(file => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') {
-            newImages.push(reader.result);
-            form.setValue("images", newImages);
-          }
+    if (!files || files.length === 0) return;
+
+    setIsUploadingImages(true);
+    try {
+      const token = await getIdToken();
+      if (!token) throw new Error("Not signed in");
+
+      const currentImages = [...form.getValues("images")];
+      for (const file of Array.from(files)) {
+        const ext = getExtension(file.name);
+        if (!ext) throw new Error("Invalid file extension");
+
+        const signRes = await fetch("/.netlify/functions/r2-sign-upload", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            bucket: "public",
+            contentType: file.type || "application/octet-stream",
+            extension: ext,
+            pathPrefix: "vehicles",
+          }),
+        });
+
+        if (!signRes.ok) {
+          const msg = await signRes.text();
+          throw new Error(msg || "Failed to sign upload");
+        }
+
+        const signed = (await signRes.json()) as {
+          url: string;
+          key: string;
+          method: string;
+          headers?: Record<string, string>;
         };
-        reader.readAsDataURL(file);
-      });
+
+        const putRes = await fetch(signed.url, {
+          method: signed.method || "PUT",
+          headers: signed.headers ?? { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        });
+
+        if (!putRes.ok) {
+          const msg = await putRes.text();
+          throw new Error(msg || "Upload failed");
+        }
+
+        currentImages.push(buildPublicUrl(signed.key));
+        form.setValue("images", [...currentImages], { shouldValidate: true, shouldDirty: true });
+      }
+    } finally {
+      setIsUploadingImages(false);
+      e.target.value = "";
     }
   };
 
@@ -689,15 +750,25 @@ export function VehicleFormDialog({
                           </div>
                         ))}
                         
-                        <label className="flex flex-col items-center justify-center aspect-video rounded-lg border-2 border-dashed border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50 transition-colors cursor-pointer">
+                        <label
+                          className={cn(
+                            "flex flex-col items-center justify-center aspect-video rounded-lg border-2 border-dashed border-muted-foreground/25 transition-colors",
+                            isUploadingImages
+                              ? "opacity-60 cursor-not-allowed"
+                              : "cursor-pointer hover:border-primary/50 hover:bg-muted/50",
+                          )}
+                        >
                           <Upload className="w-6 h-6 text-muted-foreground mb-2" />
-                          <span className="text-xs text-muted-foreground">Upload Image</span>
+                          <span className="text-xs text-muted-foreground">
+                            {isUploadingImages ? "Uploading..." : "Upload Image"}
+                          </span>
                           <input 
                             type="file" 
                             accept="image/*" 
                             multiple 
                             className="hidden" 
                             onChange={handleImageUpload}
+                            disabled={isUploadingImages}
                           />
                         </label>
                       </div>

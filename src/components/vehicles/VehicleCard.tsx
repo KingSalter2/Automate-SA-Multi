@@ -5,33 +5,23 @@ import { Button } from '@/components/ui/button';
 import { Heart, Share2, Fuel, Gauge, Calendar, Settings2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-// Import vehicle images
-import bmw3Series from '@/assets/vehicles/bmw-3-series.jpg';
-import mercedesCClass from '@/assets/vehicles/mercedes-c-class.jpg';
-import vwGolfGti from '@/assets/vehicles/vw-golf-gti.jpg';
-import toyotaHilux from '@/assets/vehicles/toyota-hilux.jpg';
-import fordRanger from '@/assets/vehicles/ford-ranger.jpg';
-import audiA4 from '@/assets/vehicles/audi-a4.jpg';
-import porscheCayenne from '@/assets/vehicles/porsche-cayenne.jpg';
-import landRoverDefender from '@/assets/vehicles/land-rover-defender.jpg';
-
-const vehicleImages: Record<string, string> = {
-  '1': bmw3Series,
-  '2': mercedesCClass,
-  '3': vwGolfGti,
-  '4': toyotaHilux,
-  '5': fordRanger,
-  '6': audiA4,
-  '7': porscheCayenne,
-  '8': landRoverDefender,
-};
-
 interface VehicleCardProps {
   vehicle: Vehicle;
   viewMode?: 'grid' | 'list';
 }
 
 export function VehicleCard({ vehicle, viewMode = 'grid' }: VehicleCardProps) {
+  const buildPublicImageUrl = (value: string | undefined) => {
+    if (!value) return "/placeholder.svg";
+    const trimmed = value.trim();
+    if (!trimmed) return "/placeholder.svg";
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    const base = (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITE_R2_PUBLIC_BASE_URL;
+    const baseUrl = typeof base === "string" ? base.trim() : "";
+    if (!baseUrl) return trimmed;
+    return `${baseUrl.replace(/\/+$/, "")}/${trimmed.replace(/^\/+/, "")}`;
+  };
+
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('en-ZA', {
       style: 'currency',
@@ -67,7 +57,7 @@ export function VehicleCard({ vehicle, viewMode = 'grid' }: VehicleCardProps) {
     }
   };
 
-  const vehicleImage = vehicleImages[vehicle.id] || vehicleImages['1'];
+  const vehicleImage = buildPublicImageUrl(vehicle.images[0]);
 
   if (viewMode === 'list') {
     return (

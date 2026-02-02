@@ -3,10 +3,9 @@ import { Footer } from '@/components/layout/Footer';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { VehicleCard } from '@/components/vehicles/VehicleCard';
 import { FinanceCalculator } from '@/components/finance/FinanceCalculator';
-import { mockVehicles } from '@/data/mockVehicles';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   Search, 
@@ -22,12 +21,99 @@ import {
   ChevronRight
 } from 'lucide-react';
 import heroImage from '@/assets/hero-car.jpg';
+import { useQuery } from '@tanstack/react-query';
+import type { Vehicle } from '@/types/vehicle';
 
 const Index = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
-  const featuredVehicles = mockVehicles.slice(0, 4);
-  const specialVehicles = mockVehicles.filter(v => v.originalPrice && v.originalPrice > v.price);
+
+  const toNumber = (v: unknown) => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string") return Number(v);
+    return 0;
+  };
+
+  const toOptionalNumber = (v: unknown) => {
+    if (v == null) return undefined;
+    const n = toNumber(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  const toStringArray = (v: unknown) => {
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is string => typeof x === "string");
+  };
+
+  const toDate = (v: unknown) => {
+    if (!v) return new Date();
+    const d = new Date(typeof v === "string" || typeof v === "number" ? v : String(v));
+    return Number.isNaN(d.getTime()) ? new Date() : d;
+  };
+
+  const fromApiVehicle = (raw: Record<string, unknown>): Vehicle => ({
+    id: String(raw.id ?? ""),
+    make: String(raw.make ?? ""),
+    model: String(raw.model ?? ""),
+    variant: raw.variant ? String(raw.variant) : undefined,
+    year: toNumber(raw.year),
+    price: toNumber(raw.price),
+    originalPrice: toOptionalNumber(raw.originalPrice),
+    mileage: toNumber(raw.mileage),
+    fuelType: String(raw.fuelType ?? "Petrol") as Vehicle["fuelType"],
+    transmission: String(raw.transmission ?? "Automatic") as Vehicle["transmission"],
+    bodyType: String(raw.bodyType ?? "Sedan") as Vehicle["bodyType"],
+    condition: String(raw.condition ?? "Used") as Vehicle["condition"],
+    drive: raw.drive ? (String(raw.drive) as NonNullable<Vehicle["drive"]>) : undefined,
+    seats: raw.seats == null ? undefined : toNumber(raw.seats),
+    color: String(raw.color ?? ""),
+    engineSize: raw.engineSize ? String(raw.engineSize) : undefined,
+    images: toStringArray(raw.images),
+    features: toStringArray(raw.features),
+    isSpecialOffer: typeof raw.isSpecialOffer === "boolean" ? raw.isSpecialOffer : undefined,
+    estMonthlyPayment: toOptionalNumber(raw.estMonthlyPayment),
+    status: String(raw.status ?? "draft") as Vehicle["status"],
+    vin: raw.vin ? String(raw.vin) : undefined,
+    engineNumber: raw.engineNumber ? String(raw.engineNumber) : undefined,
+    registrationNumber: raw.registrationNumber ? String(raw.registrationNumber) : undefined,
+    stockNumber: String(raw.stockNumber ?? ""),
+    costPrice: toOptionalNumber(raw.costPrice),
+    reconditioningCost: toOptionalNumber(raw.reconditioningCost),
+    natisNumber: raw.natisNumber ? String(raw.natisNumber) : undefined,
+    previousOwner: raw.previousOwner ? String(raw.previousOwner) : undefined,
+    keyNumber: raw.keyNumber ? String(raw.keyNumber) : undefined,
+    supplier: raw.supplier ? String(raw.supplier) : undefined,
+    purchaseDate: raw.purchaseDate ? toDate(raw.purchaseDate) : undefined,
+    branch: String(raw.branch ?? ""),
+    description: raw.description ? String(raw.description) : undefined,
+    serviceHistory: typeof raw.serviceHistory === "boolean" ? raw.serviceHistory : undefined,
+    warrantyMonths: raw.warrantyMonths == null ? undefined : toNumber(raw.warrantyMonths),
+    createdAt: toDate(raw.createdAt),
+  });
+
+  const vehiclesQuery = useQuery({
+    queryKey: ["vehicles-public"],
+    queryFn: async () => {
+      const res = await fetch("/.netlify/functions/vehicles-public");
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to load vehicles");
+      }
+      const data = (await res.json()) as { vehicles: Array<Record<string, unknown>> };
+      return data.vehicles.map(fromApiVehicle);
+    },
+  });
+
+  const availableVehicles = useMemo(() => {
+    return (vehiclesQuery.data ?? []).filter((v) => v.status === "available");
+  }, [vehiclesQuery.data]);
+
+  const featuredVehicles = useMemo(() => availableVehicles.slice(0, 4), [availableVehicles]);
+
+  const specialVehicles = useMemo(
+    () => availableVehicles.filter((v) => typeof v.originalPrice === "number" && v.originalPrice > v.price),
+    [availableVehicles],
+  );
 
   const handleSearch = () => {
     navigate(`/vehicles?search=${encodeURIComponent(searchTerm)}`);

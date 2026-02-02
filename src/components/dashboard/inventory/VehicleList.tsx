@@ -38,6 +38,17 @@ export function VehicleList({ vehicles, onEdit, onDelete, onPreview }: VehicleLi
     }).format(amount);
   };
 
+  const buildPublicImageUrl = (value: string | undefined) => {
+    if (!value) return "/placeholder.svg";
+    const trimmed = value.trim();
+    if (!trimmed) return "/placeholder.svg";
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    const base = (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITE_R2_PUBLIC_BASE_URL;
+    const baseUrl = typeof base === "string" ? base.trim() : "";
+    if (!baseUrl) return trimmed;
+    return `${baseUrl.replace(/\/+$/, "")}/${trimmed.replace(/^\/+/, "")}`;
+  };
+
   const getStockAgeColor = (date: Date) => {
     const days = differenceInDays(new Date(), new Date(date));
     if (days > 90) return "bg-red-900 text-white animate-pulse";
@@ -102,7 +113,7 @@ export function VehicleList({ vehicles, onEdit, onDelete, onPreview }: VehicleLi
                   >
                     {vehicle.images.length > 0 ? (
                       <img
-                        src={vehicle.images[0]}
+                        src={buildPublicImageUrl(vehicle.images[0])}
                         alt={`${vehicle.make} ${vehicle.model}`}
                         className="w-full h-full object-cover"
                       />
