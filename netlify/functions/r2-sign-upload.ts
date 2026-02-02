@@ -12,11 +12,39 @@ const getRequiredEnv = (key: string) => {
   return v;
 };
 
+const normalizeEnvValue = (value: string) => {
+  const trimmed = value.trim();
+  const isWrapped =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith("`") && trimmed.endsWith("`"));
+  return isWrapped ? trimmed.slice(1, -1).trim() : trimmed;
+};
+
+const normalizeFirebasePrivateKey = (value: string) => {
+  let v = normalizeEnvValue(value);
+  if (v.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(v) as { private_key?: unknown };
+      if (typeof parsed.private_key === "string") v = parsed.private_key;
+    } catch {
+      // ignore
+    }
+  }
+  v = v.replace(/\\n/g, "\n").trim();
+  if (!v.includes("BEGIN PRIVATE KEY") || !v.includes("END PRIVATE KEY")) {
+    throw new Error(
+      "Invalid FIREBASE_ADMIN_PRIVATE_KEY. Paste the full 'private_key' value from the Firebase service account JSON.",
+    );
+  }
+  return v;
+};
+
 const getFirebaseAuth = () => {
   if (!getApps().length) {
-    const projectId = getRequiredEnv("FIREBASE_ADMIN_PROJECT_ID");
-    const clientEmail = getRequiredEnv("FIREBASE_ADMIN_CLIENT_EMAIL");
-    const privateKey = getRequiredEnv("FIREBASE_ADMIN_PRIVATE_KEY").replace(/\\n/g, "\n");
+    const projectId = normalizeEnvValue(getRequiredEnv("FIREBASE_ADMIN_PROJECT_ID"));
+    const clientEmail = normalizeEnvValue(getRequiredEnv("FIREBASE_ADMIN_CLIENT_EMAIL"));
+    const privateKey = normalizeFirebasePrivateKey(getRequiredEnv("FIREBASE_ADMIN_PRIVATE_KEY"));
 
     initializeApp({
       credential: cert({
