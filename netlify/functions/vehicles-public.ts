@@ -20,9 +20,25 @@ const normalizeEnvValue = (value: string) => {
 };
 
 const validateDbConnectionString = (connectionString: string) => {
-  const v = normalizeEnvValue(connectionString);
+  const raw = normalizeEnvValue(connectionString);
+  const candidate = raw.toLowerCase().startsWith("psql ") ? raw.slice("psql ".length).trim() : raw;
+  const idx = candidate.search(/postgres(ql)?:\/\//i);
+  const extracted =
+    idx >= 0
+      ? candidate
+          .slice(idx)
+          .trim()
+          .replace(/^['"`]+/, "")
+          .replace(/['"`]+$/, "")
+          .split(/\s+/)[0]
+      : candidate;
+  const match = extracted.match(/postgres(ql)?:\/\/[^'"\s]+/i);
+  const v = match ? match[0] : extracted;
   if (!/^postgres(ql)?:\/\//i.test(v)) {
-    throw new Error("Invalid NEON_DATABASE_URL. Expected a postgres:// connection string.");
+    const startsWithPsql = raw.toLowerCase().startsWith("psql ");
+    const containsPostgres = /postgres(ql)?:\/\//i.test(raw);
+    const info = `startsWithPsql=${startsWithPsql}, containsPostgres=${containsPostgres}`;
+    throw new Error(`Invalid NEON_DATABASE_URL. Expected a postgres:// connection string. ${info}`);
   }
   try {
     const url = new URL(v);
