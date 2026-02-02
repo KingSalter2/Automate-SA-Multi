@@ -10,14 +10,46 @@ const getRequiredEnv = (key: string) => {
   return v;
 };
 
+const normalizeEnvValue = (value: string) => {
+  const trimmed = value.trim();
+  const isWrapped =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith("`") && trimmed.endsWith("`"));
+  return isWrapped ? trimmed.slice(1, -1).trim() : trimmed;
+};
+
+const validateDbConnectionString = (connectionString: string) => {
+  const v = normalizeEnvValue(connectionString);
+  if (!/^postgres(ql)?:\/\//i.test(v)) {
+    throw new Error("Invalid NEON_DATABASE_URL. Expected a postgres:// connection string.");
+  }
+  try {
+    const url = new URL(v);
+    if (!url.hostname) {
+      throw new Error("Invalid NEON_DATABASE_URL. Missing hostname.");
+    }
+    if (url.hostname.toLowerCase() === "base") {
+      throw new Error("Invalid NEON_DATABASE_URL. Hostname is 'base'.");
+    }
+  } catch {
+    throw new Error("Invalid NEON_DATABASE_URL. Unable to parse connection string.");
+  }
+  return v;
+};
+
 const getPool = () => {
   if (pool) return pool;
-  const connectionString = process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL ?? getRequiredEnv("NEON_DATABASE_URL");
+  const connectionString = validateDbConnectionString(
+    process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL ?? getRequiredEnv("NEON_DATABASE_URL"),
+  );
   const needsSsl = !connectionString.includes("localhost") && !connectionString.includes("127.0.0.1");
   pool = new Pool({
     connectionString,
     ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
     max: 5,
+    connectionTimeoutMillis: 8000,
+    query_timeout: 15000,
   });
   return pool;
 };
@@ -162,4 +194,3 @@ export const handler: Handler = async (event) => {
     return { statusCode: 500, body: message };
   }
 };
-

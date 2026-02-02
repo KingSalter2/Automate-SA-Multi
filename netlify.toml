@@ -3,6 +3,11 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[dev]
+  command = "npm run dev"
+  port = 8888
+  targetPort = 5174
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
